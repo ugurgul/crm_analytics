@@ -49,11 +49,135 @@
            # 7. En fazla siparişi veren ilk 10 müşteriyi sıralayınız.
            # 8. Veri ön hazırlık sürecini fonksiyonlaştırınız.
 
+#1
+import pandas as pd
+import datetime as dt
+pd.set_option('display.max_columns', None)
+df_ = pd.read_csv('datasets/flo_data_20k.csv')
+pd.set_option('display.float_format', lambda x: '%.3f' % x)
+pd.set_option("display.width", 500)
+df = df_.copy()
+
+#2
+
+#a
+df.head(10)
+#b
+df.columns
+#c
+df.describe().T
+#d
+df.isnull().sum()
+#e
+df.columns.dtype.type
+
+#3
+df["order_num_total_ever_offline"]
+df["order_num_total_ever_online"]
+
+df["customer_value_total_ever_offline"]
+df["customer_value_total_ever_online"]
+
+df["total_order"] = df["order_num_total_ever_offline"] + df["order_num_total_ever_online"]
+
+df["total_order_value"] = df["customer_value_total_ever_offline"] + df["customer_value_total_ever_online"]
+
+#4
+print(df.dtypes)
+
+df["first_order_date"] = pd.to_datetime(df['first_order_date'])
+df["last_order_date"] = pd.to_datetime(df['last_order_date'])
+df["last_order_date_online"] = pd.to_datetime(df['last_order_date_online'])
+df["last_order_date_offline"] = pd.to_datetime(df['last_order_date_offline'])
+
+#5
+df.groupby('order_channel').agg({
+    'master_id': pd.Series.nunique,  # Benzersiz müşteri sayısı
+    'total_order': 'sum',  # Online toplam ürün sayısı
+    'total_order_value': 'sum',  # Online toplam harcamalar
+}).reset_index()
+
+#6
+df.groupby('master_id').agg({'total_order_value': "sum"}).sort_values(by='total_order_value', ascending=False).head(10)
+
+#7
+df["total_order"] = df["total_order"].astype(int)
+df.groupby('master_id').agg({'total_order': "sum"}).sort_values(by="total_order",ascending=False).head(10)
+
+#8
+def data_prep(dataframe,first_ten=False):
+    dataframe["total_order"] = dataframe["order_num_total_ever_offline"] + dataframe["order_num_total_ever_online"]
+    dataframe["total_order_value"] = dataframe["customer_value_total_ever_offline"] + dataframe["customer_value_total_ever_online"]
+
+    dataframe["first_order_date"] = pd.to_datetime(dataframe['first_order_date'])
+    dataframe["last_order_date"] = pd.to_datetime(dataframe['last_order_date'])
+    dataframe["last_order_date_online"] = pd.to_datetime(dataframe['last_order_date_online'])
+    dataframe["last_order_date_offline"] = pd.to_datetime(dataframe['last_order_date_offline'])
+
+    prep_df = dataframe.groupby('order_channel').agg({
+        'master_id': pd.Series.nunique,  # Benzersiz müşteri sayısı
+        'total_order': 'sum',  # Online toplam ürün sayısı
+        'total_order_value': 'sum',  # Online toplam harcamalar
+    }).reset_index()
+
+    if first_ten:
+        prep_df = dataframe.groupby('master_id').agg({'total_order_value': "sum"}).sort_values(by='total_order_value', ascending=False).head(
+            10)
+        prep_df = dataframe["total_order"] = dataframe["total_order"].astype(int)
+        prep_df = dataframe.groupby('master_id').agg({'total_order': "sum"}).sort_values(by="total_order", ascending=False).head(10)
+
+    return prep_df
+
+
 # GÖREV 2: RFM Metriklerinin Hesaplanması
+
+#1 & 2
+
+today_date = dt.datetime(2021, 6, 2)
+
+
+df.groupby("master_id").agg({"last_order_date": lambda last_order_date: (today_date - last_order_date.max()).days,
+                             "total_order": lambda total_order: total_order,
+                             "total_order_value": lambda total_order_value: total_order_value.sum()})
+
+#3
+rfm = df.groupby("master_id").agg({"last_order_date": lambda last_order_date: (today_date - last_order_date.max()).days,
+                             "total_order": lambda total_order: total_order,
+                             "total_order_value": lambda total_order_value: total_order_value.sum()})
+
+#4
+rfm.columns = ['recency', 'frequency', 'monetary']
+
 
 # GÖREV 3: RF ve RFM Skorlarının Hesaplanması
 
+rfm["recency_score"] = pd.qcut(rfm["recency"], q=5, labels=[5, 4, 3, 2, 1])
+
+rfm["frequency_score"] = pd.qcut(rfm["frequency"].rank(method="first"), q=5, labels=[1, 2, 3, 4, 5])
+
+rfm["monetary_score"] = pd.qcut(rfm["monetary"], q=5, labels=[1, 2, 3, 4, 5])
+
+rfm["RFM_SCORE"] = (rfm['recency_score'].astype(str) +
+                    rfm['frequency_score'].astype(str))
+
+
 # GÖREV 4: RF Skorlarının Segment Olarak Tanımlanması
+
+seg_map = {
+    r'[1-2][1-2]': 'hibernating',
+    r'[1-2][3-4]': 'at_Risk',
+    r'[1-2]5': 'cant_loose',
+    r'3[1-2]': 'about_to_sleep',
+    r'33': 'need_attention',
+    r'[3-4][4-5]': 'loyal_customers',
+    r'41': 'promising',
+    r'51': 'new_customers',
+    r'[4-5][2-3]': 'potential_loyalists',
+    r'5[4-5]': 'champions'
+}
+
+rfm['segment'] = rfm['RFM_SCORE'].replace(seg_map, regex=True)
+
 
 # GÖREV 5: Aksiyon zamanı!
            # 1. Segmentlerin recency, frequnecy ve monetary ortalamalarını inceleyiniz.
@@ -66,8 +190,42 @@
                    # alışveriş yapmayan kaybedilmemesi gereken müşteriler, uykuda olanlar ve yeni gelen müşteriler özel olarak hedef alınmak isteniliyor. Uygun profildeki müşterilerin id'lerini csv dosyasına indirim_hedef_müşteri_ids.csv
                    # olarak kaydediniz.
 
+#1################################################
+rfm[["segment", "recency", "frequency", "monetary"]].groupby("segment").agg(["mean", "count"])
+
+
+rfm[(rfm["segment"] == "champions") & (rfm["segment"] == "loyal_customers")]
+
+filtered_rfm = rfm[rfm['segment'].isin(['champions', 'loyal_customers'])]
+
+filtered_df = df[df['interested_in_categories_12'].str.contains('KADIN')]
+
+merged_df = pd.merge(filtered_rfm, filtered_df, on='master_id')
+
+merged_df["master_id"]
+
+merged_df['master_id'].to_csv("customer_rfm_id.csv", index=False)
+
+
+#2##########################################################################
+
+rfm["segment"].value_counts()
+"cant_loose","about_to_sleep","new_customers"
+
+filtered_rfm = rfm[rfm["segment"].isin(['cant_loose', 'about_to_sleep', "new_customers"])]
+
+filtered_df = df[df['interested_in_categories_12'].str.contains('ERKEK', "COCUK")]
+
+merged_df = pd.merge(filtered_rfm, filtered_df, on="master_id")
+
+merged_df['master_id'].to_csv("customer_rfm.csv", index=False)
+
 
 # GÖREV 6: Tüm süreci fonksiyonlaştırınız.
+
+
+
+
 
 ###############################################################
 # GÖREV 1: Veriyi  Hazırlama ve Anlama (Data Understanding)
